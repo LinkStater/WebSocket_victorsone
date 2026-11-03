@@ -1,14 +1,19 @@
 
-const http = require("http");
-const { WebSocketServer, WebSocket } = require("ws");
-const { randomUUID } = require("crypto");
+import http from "node:http";
+import { WebSocketServer, WebSocket } from "ws";
+import { randomUUID } from "node:crypto";
 
 const server = http.createServer((req, res) => {
-    res.writeHead(404);
-    res.end("WebSocket server online");
+    res.writeHead(404, {
+        "Content-Type": "text/plain"
+    });
+    res.end("WebSocket endpoint active");
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({
+    server,
+    path: "/api/ws"
+});
 
 const players = new Map();
 
@@ -38,14 +43,12 @@ wss.on("connection", (ws) => {
 
     players.set(id, player);
 
-    // Envia o estado inicial para o novo jogador
     ws.send(JSON.stringify({
         type: "init",
         id,
         players: Array.from(players.values())
     }));
 
-    // Informa os demais jogadores
     broadcast({
         type: "player_joined",
         player
@@ -68,10 +71,12 @@ wss.on("connection", (ws) => {
 
             if (!values.every(Number.isFinite)) return;
 
-            player.x = data.x;
-            player.y = data.y;
-            player.z = data.z;
-            player.rotationY = data.rotationY;
+            Object.assign(player, {
+                x: data.x,
+                y: data.y,
+                z: data.z,
+                rotationY: data.rotationY
+            });
 
             broadcast({
                 type: "player_moved",
@@ -79,7 +84,7 @@ wss.on("connection", (ws) => {
             }, ws);
 
         } catch (error) {
-            console.error("Mensagem inválida:", error.message);
+            console.error("Mensagem inválida:", error);
         }
     });
 
@@ -95,12 +100,8 @@ wss.on("connection", (ws) => {
     });
 
     ws.on("error", (error) => {
-        console.error("Erro WebSocket:", error.message);
+        console.error("WebSocket:", error.message);
     });
 });
 
-// IMPORTANTE:
-// Não utilizar server.listen() na Vercel.
-// A Function exporta o servidor HTTP.
-
-module.exports = server;
+export default server;
