@@ -3,19 +3,14 @@ import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
 
-const server = http.createServer((req, res) => {
-    res.writeHead(404, {
-        "Content-Type": "text/plain"
-    });
-    res.end("WebSocket endpoint active");
-});
-
-const wss = new WebSocketServer({
-    server,
-    path: "/api/ws"
-});
+const server = http.createServer();
+const wss = new WebSocketServer({ server });
 
 const players = new Map();
+
+function log(...args) {
+    console.log("[MULTIPLAYER]", new Date().toISOString(), ...args);
+}
 
 function broadcast(data, exclude = null) {
     const message = JSON.stringify(data);
@@ -30,7 +25,7 @@ function broadcast(data, exclude = null) {
     }
 }
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
     const id = randomUUID();
 
     const player = {
@@ -43,6 +38,9 @@ wss.on("connection", (ws) => {
 
     players.set(id, player);
 
+    log("PLAYER CONNECTED:", id);
+    log("TOTAL PLAYERS NESTA INSTÂNCIA:", players.size);
+
     ws.send(JSON.stringify({
         type: "init",
         id,
@@ -53,8 +51,6 @@ wss.on("connection", (ws) => {
         type: "player_joined",
         player
     }, ws);
-
-    console.log("Jogador conectado:", id);
 
     ws.on("message", (message) => {
         try {
@@ -71,12 +67,10 @@ wss.on("connection", (ws) => {
 
             if (!values.every(Number.isFinite)) return;
 
-            Object.assign(player, {
-                x: data.x,
-                y: data.y,
-                z: data.z,
-                rotationY: data.rotationY
-            });
+            player.x = data.x;
+            player.y = data.y;
+            player.z = data.z;
+            player.rotationY = data.rotationY;
 
             broadcast({
                 type: "player_moved",
@@ -84,23 +78,24 @@ wss.on("connection", (ws) => {
             }, ws);
 
         } catch (error) {
-            console.error("Mensagem inválida:", error);
+            log("INVALID MESSAGE:", error.message);
         }
     });
 
     ws.on("close", () => {
         players.delete(id);
 
+        log("PLAYER DISCONNECTED:", id);
+        log("TOTAL PLAYERS:", players.size);
+
         broadcast({
             type: "player_left",
             id
         });
-
-        console.log("Jogador desconectado:", id);
     });
 
     ws.on("error", (error) => {
-        console.error("WebSocket:", error.message);
+        log("WEBSOCKET ERROR:", error.message);
     });
 });
 
