@@ -3,70 +3,165 @@ const express = require("express");
 const { randomUUID } = require("crypto");
 
 const app = express();
+
 app.use(express.json());
 
+const PORT = process.env.PORT || 3000;
+
+// Jogadores conectados
 const players = new Map();
 
-// Jogador entra
+const HEARTBEAT_TIMEOUT = 10000;
+
+// ======================================
+// ENTRAR NO JOGO
+// ======================================
+
 app.post("/join", (req, res) => {
     const id = randomUUID();
 
-    players.set(id, {
+    const player = {
         id,
         x: 0,
         y: 0,
         z: 0,
         rotationY: 0,
         lastUpdate: Date.now()
-    });
+    };
+
+    players.set(id, player);
+
+    console.log("PLAYER CONNECTED:", id);
+    console.log("TOTAL PLAYERS:", players.size);
 
     res.json({ id });
 });
 
-// Atualizar posição
+// ======================================
+// ATUALIZAR POSIÇÃO
+// ======================================
+
 app.post("/move", (req, res) => {
     const { id, x, y, z, rotationY } = req.body;
+
     const player = players.get(id);
 
     if (!player) {
-        return res.status(404).json({ error: "Player não encontrado" });
+        return res.status(404).json({
+            error: "Player não encontrado"
+        });
     }
 
-    if (![x, y, z, rotationY].every(Number.isFinite)) {
-        return res.status(400).json({ error: "Posição inválida" });
+    const values = [x, y, z, rotationY];
+
+    if (!values.every(Number.isFinite)) {
+        return res.status(400).json({
+            error: "Posição inválida"
+        });
     }
 
     Object.assign(player, {
-        x, y, z, rotationY,
+        x,
+        y,
+        z,
+        rotationY,
         lastUpdate: Date.now()
     });
 
     res.sendStatus(200);
 });
 
-// Buscar outros jogadores
-app.get("/players/:id", (req, res) => {
-    const now = Date.now();
+// ======================================
+// HEARTBEAT
+// ======================================
 
-    // Remover jogadores inativos há mais de 30 segundos
-    for (const [id, player] of players) {
-        if (now - player.lastUpdate > 30000) {
-            players.delete(id);
-        }
+app.post("/heartbeat/:id", (req, res) => {
+    const player = players.get(req.params.id);
+
+    if (!player) {
+        return res.status(404).json({
+            error: "Player não encontrado"
+        });
     }
 
-    const result = [...players.values()]
-        .filter(player => player.id !== req.params.id);
+    player.lastUpdate = Date.now();
+
+    res.sendStatus(200);
+});
+
+// ======================================
+// BUSCAR OUTROS JOGADORES
+// ======================================
+
+app.get("/players/:id", (req, res) => {
+    const playerId = req.params.id;
+
+    const result = Array.from(players.values())
+        .filter(player => player.id !== playerId)
+        .map(player => ({
+            id: player.id,
+            x: player.x,
+            y: player.y,
+            z: player.z,
+            rotationY: player.rotationY
+        }));
 
     res.json(result);
 });
 
-// Jogador sai
+// ======================================
+// DESCONECTAR
+// ======================================
+
 app.delete("/leave/:id", (req, res) => {
-    players.delete(req.params.id);
+    const id = req.params.id;
+
+    if (players.delete(id)) {
+        console.log("PLAYER LEFT:", id);
+        console.log("TOTAL PLAYERS:", players.size);
+    }
+
     res.sendStatus(200);
 });
 
-app.listen(process.env.PORT || 3000, () => {
-    console.log("Express Multiplayer Online");
+// ======================================
+// DETECTAR JOGADORES DESCONECTADOS
+// ======================================
+
+setInterval(() => {
+    const now = Date.now();
+
+    for (const [id, player] of players) {
+        const inactiveTime = now - player.lastUpdate;
+
+        if (inactiveTime > HEARTBEAT_TIMEOUT) {
+            players.delete(id);
+
+            console.log("PLAYER DISCONNECTED:", id);
+            console.log("TOTAL PLAYERS:", players.size);
+        }
+    }
+}, 3000);
+
+// ======================================
+// STATUS
+// ======================================
+
+app.get("/", (req, res) => {
+    res.json({
+        status: "Multiplayer API Online",
+        players: players.size
+    });
 });
+
+// ======================================
+// EXPORTAR API
+// ======================================
+
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log("MULTIPLAYER API ONLINE:", PORT);
+    });
+}
+
+module.exports = app;
