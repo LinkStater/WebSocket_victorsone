@@ -1,9 +1,13 @@
 
 const http = require("http");
-const { WebSocketServer } = require("ws");
+const { WebSocketServer, WebSocket } = require("ws");
 const { randomUUID } = require("crypto");
 
-const server = http.createServer();
+const server = http.createServer((req, res) => {
+    res.writeHead(404);
+    res.end("WebSocket server online");
+});
+
 const wss = new WebSocketServer({ server });
 
 const players = new Map();
@@ -12,7 +16,10 @@ function broadcast(data, exclude = null) {
     const message = JSON.stringify(data);
 
     for (const client of wss.clients) {
-        if (client !== exclude && client.readyState === 1) {
+        if (
+            client !== exclude &&
+            client.readyState === WebSocket.OPEN
+        ) {
             client.send(message);
         }
     }
@@ -31,13 +38,20 @@ wss.on("connection", (ws) => {
 
     players.set(id, player);
 
+    // Envia o estado inicial para o novo jogador
     ws.send(JSON.stringify({
         type: "init",
         id,
         players: Array.from(players.values())
     }));
 
-    broadcast({ type: "player_joined", player }, ws);
+    // Informa os demais jogadores
+    broadcast({
+        type: "player_joined",
+        player
+    }, ws);
+
+    console.log("Jogador conectado:", id);
 
     ws.on("message", (message) => {
         try {
@@ -45,27 +59,48 @@ wss.on("connection", (ws) => {
 
             if (data.type !== "move") return;
 
-            player.x = Number(data.x) || 0;
-            player.y = Number(data.y) || 0;
-            player.z = Number(data.z) || 0;
-            player.rotationY = Number(data.rotationY) || 0;
+            const values = [
+                data.x,
+                data.y,
+                data.z,
+                data.rotationY
+            ];
+
+            if (!values.every(Number.isFinite)) return;
+
+            player.x = data.x;
+            player.y = data.y;
+            player.z = data.z;
+            player.rotationY = data.rotationY;
 
             broadcast({
                 type: "player_moved",
                 player
             }, ws);
 
-        } catch {
-            console.log("Mensagem inválida");
+        } catch (error) {
+            console.error("Mensagem inválida:", error.message);
         }
     });
 
     ws.on("close", () => {
         players.delete(id);
-        broadcast({ type: "player_left", id });
+
+        broadcast({
+            type: "player_left",
+            id
+        });
+
+        console.log("Jogador desconectado:", id);
+    });
+
+    ws.on("error", (error) => {
+        console.error("Erro WebSocket:", error.message);
     });
 });
 
-server.listen(8080, () => {
-    console.log("Servidor online na porta 8080");
-});
+// IMPORTANTE:
+// Não utilizar server.listen() na Vercel.
+// A Function exporta o servidor HTTP.
+
+module.exports = server;
